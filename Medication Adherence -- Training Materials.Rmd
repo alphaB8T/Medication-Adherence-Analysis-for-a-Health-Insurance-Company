@@ -1,0 +1,103 @@
+---
+title: "Medication Adherence:  Training Material"
+author: ""
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+setwd("C:/xyz/CU/5902 Capstone - Data Science Consulting/IP2")
+```
+
+```{r seed}
+set.seed(41)
+```
+
+```{r libraries}
+library(data.table)
+library(DT)
+```
+
+```{r functions}
+round.numerics <- function(x, digits){
+  if(is.numeric(x)){
+    x <- round(x = x, digits = digits)
+  }
+  return(x)
+}
+```
+
+```{r load_data}
+adherence = fread("adherence.csv")
+baseline = fread("baseline measurements.csv")
+```
+
+```{r constants}
+total_patients = nrow(baseline)
+followup = adherence[, .SD[.N], by = "id"][, c("id", "t2")]
+```
+
+```{r explore_data, eval = FALSE}
+
+```
+
+
+```{r clean_data}
+
+```
+
+
+
+## Introduction
+This project analyzes medication adherence and some relevant factors. The adherence data used in the project is panel data, in which there are many records for each patient over time, and the prescription filled and medication adherence in each recorded period can be different for each patient. Thus, it is a challenge to manipulate the data to analyze adherence behaviors over time.
+
+### Deealing with Different Time Frames
+
+It is not straightforward to get certain time frames that we want directly. For example, in Question 2, we want to know the proportion of days in the first year after diagnosis during which the medication was possessed (one-year adherence) for patients with at least 365 days of follow-up. Of course, we have to get the patients who have t2 equal or larger than 365 to get patients who have at least 365 days of follow-up.
+```{r}
+one_year_more_id = followup[t2>=365, id]
+one_year = length(one_year_more_id)
+one_year_more_df = adherence[id %in% one_year_more_id]
+```
+
+Then, since we want the **one-year** adherence, we need to manipulate t1 and t2 to get the target time frame that we want. We need to select t1 that are less than 365, so we can focus on follow-up periods that start within 365 days and filter out follow-up periods that start after 365 days.
+
+```{r}
+one_year_df = one_year_more_df[t1 < 365]
+```
+
+Then, we will get a data set in which the last record of a patients may have t1 smaller than 365 but t2 larger than 365. Since we want to know what happens within the 365 days, if t2 is larger than 365, we will get extra records for adherence if the patient has 1 in the medication indicator during this interval. Because I was planning to calculate the number of days of possessing a medication by summing the multiplication of the medication indicator and the corresponding time interval, t2 larger than 365 can lead to more days of adherence than the actual one within 365 days.
+
+To avoid such bias, we can make t2 larger than 365 equal to 365. At the same time, t2 smaller than 365 should still have their own values. Then, we can calculate the intervals using t1 and the adjusted t2.
+
+```{r}
+one_year_df[t2 > 365, adjusted_t2 := 365]
+one_year_df[is.na(adjusted_t2), adjusted_t2 := t2]
+one_year_df[, interval := adjusted_t2 - t1]
+```
+
+The similar procedure can be used in Question 9 as well to get the interval beginning at day 14 and lastsing for 365 days.
+
+### Whether filled a prescription in the first two weeks
+
+In Question 5, we want to calculate the percentage of the patients filled a prescription in the first two weeks after their initial diagnoses. If the patient filled a medication twice in the first two weeks, we still want to mark the patient as "1" in the classification of filling or not filling the prescription during this period. We want to classify the patient as filled the prescription as long as the patient filled at least 1 prescription in the period. Since we only know if a patient filled a prescription in each time interval, simple summation of the medication indicator is not enough. If the patient filled a prescription at t1 = 6, it is a "1" in the classifier, and the sum of the medication indicator is 1. If the patient filled a prescription at t1 = 2, t1 = 7, and t1 = 10, the sum of the medication indicator is 3, but it is still a "1" in the classifier. As long as the sum of the medication indicator is larger than 0, then it is a "1" in the classifier. If there is no prescription in the first 14 days, which means that the sum of the medication indicator is 0, then it is a "0" in the classifier. Thus, we need the **ifelse** function here:
+
+```{r}
+first_2_week = adherence[t1 < 14,]
+
+ace_first_14 = first_2_week[, ace_pres := sum(ace), by = "id"][, .SD[1], by = "id"][, ace_filled := ifelse(ace_pres > 0, 1, 0)]
+ace_first_14_percent = round.numerics(ace_first_14[ace_filled == 1, .N,]/total_patients*100, digits = 1)
+```
+
+The similar procedure can be used in Question 9 as well to determine the value of the **initiated** variable.
+
+### Use .SD[1] Well!
+Still, it is important to use .SD[1] well. For example, in question 8, we want to see how long does it typically take to fill that first prescription. So, we need to filter for those with medication indicator equal to 1, and then use .SD[1] to find their first time of prescription (they may have multiple prescriptions during the time frame).
+
+```{r}
+ace_prescription = first_2_week[ace == 1][, .SD[1], by = "id"]
+bb_prescription = first_2_week[bb == 1][, .SD[1], by = "id"]
+statin_prescription = first_2_week[statin == 1][, .SD[1], by = "id"]
+```
+
